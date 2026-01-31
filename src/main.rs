@@ -125,14 +125,14 @@ async fn main() {
         }
         "-v" => {
             if args.len() < 3 {
-                println!("Usage: {} -v <lab|starting_point|fortress>", args[0]);
+                println!("Usage: {} -v <lab|starting|fortress>", args[0]);
                 println!("\nVPN Types:");
                 println!("  lab            - Connect to Machines VPN");
-                println!("  starting_point - Connect to Starting Point VPN");
+                println!("  starting       - Connect to Starting Point VPN");
                 println!("  fortress       - Connect to Fortress VPN");
             } else {
                 let is_starting_point = match args[2].as_str() {
-                    "starting_point" | "sp" => true,
+                    "starting" | "sp" => true,
                     "lab" | "machine" | "machines" => false,
                     "fortress" | "fort" => {
                         eprintln!("\x1B[33mNote: Fortress VPN will use lab connection.\x1B[0m");
@@ -140,7 +140,7 @@ async fn main() {
                     }
                     _ => {
                         eprintln!("\x1B[31mInvalid VPN type: {}\x1B[0m", args[2]);
-                        println!("Valid types: lab, starting_point, fortress");
+                        println!("Valid types: lab, starting, fortress");
                         std::process::exit(1);
                     }
                 };
