@@ -45,7 +45,7 @@ To connect to a VPN:
 htb-toolkit -v lab
 
 # For Starting Point
-htb-toolkit -v starting_point
+htb-toolkit -v starting
 
 # For Fortresses
 htb-toolkit -v fortress
