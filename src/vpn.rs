@@ -2,34 +2,124 @@ use crate::api::fetch_api_async;
 use crate::appkey::get_appkey;
 use crate::colors::*;
 use crate::utils::*;
-use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use reqwest::Client;
-use serde_json::Value;
 use tokio::spawn;
 
-pub fn print_vpn_sp_list() {
-    println!("{BCYAN}┌────────────────────────────────────────────────────┐{RESET}");
-    println!("{BCYAN}| Starting Point Free VPN : EUSPFree1 USSPFree1      |{RESET}");
-    println!("{BYELLOW}| Starting Point VIP VPN  : EUSPVIP1  USSPVIP1       |{RESET}");
-    println!("{BYELLOW}└────────────────────────────────────────────────────┘{RESET}");
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct VpnServer {
+    id: i64,
+    friendly_name: String,
+    current_clients: i64,
+    location: String,
 }
 
-pub fn print_vpn_machine_list() {
-    println!("{BCYAN}┌────────────────────────────────────────────────────┐{RESET}");
-    println!("{BCYAN}| Machines Free VPN       : EUFree1 EUFree2 EUFree3  |{RESET}");
-    println!("{BCYAN}|                           USFree1 USFree2 USFree3  |{RESET}");
-    println!("{BCYAN}|                           AUFree1 SGFree1          |{RESET}");
-    println!("{BYELLOW}| Machines VIP VPN        : EUVIP1 to EUVIP28        |{RESET}");
-    println!("{BYELLOW}|                           USVIP1 to USVIP27        |{RESET}");
-    println!("{BYELLOW}|                           SGVIP1 SGVIP2 AUVIP1     |{RESET}");
-    println!("{RED}| Machines VIP+ VPN       : EUVIP+1 EUVIP+2          |{RESET}");
-    println!("{RED}|                         : USVIP+1 SGVIP+1          |{RESET}");
-    println!("{RED}└────────────────────────────────────────────────────┘{RESET}");
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct VpnAccess {
+    access_type: String,
+    location_type: String,
+    can_access: bool,
+    server: Option<VpnServer>,
+}
+
+async fn get_vpn_connections() -> Result<Vec<VpnAccess>, String> {
+    let appkey = get_appkey();
+    let result = fetch_api_async("https://labs.hackthebox.com/api/v4/connections", &appkey).await;
+
+    match result {
+        Ok(json_value) => {
+            let mut connections = Vec::new();
+            
+            if let Some(data) = json_value.get("data") {
+                // Parse lab (Machines)
+                if let Some(lab) = data.get("lab") {
+                    if let Some(true) = lab.get("can_access").and_then(|v| v.as_bool()) {
+                        let server = lab.get("assigned_server").and_then(|s| {
+                            Some(VpnServer {
+                                id: s.get("id")?.as_i64()?,
+                                friendly_name: s.get("friendly_name")?.as_str()?.to_string(),
+                                current_clients: s.get("current_clients")?.as_i64()?,
+                                location: s.get("location")?.as_str()?.to_string(),
+                            })
+                        });
+                        
+                        let location_type = lab.get("location_type_friendly")
+                            .and_then(|v| v.as_str())
+                            .ok_or("Missing location_type_friendly")?
+                            .to_string();
+                        
+                        connections.push(VpnAccess {
+                            access_type: "lab".to_string(),
+                            location_type,
+                            can_access: true,
+                            server,
+                        });
+                    }
+                }
+
+                // Parse starting_point
+                if let Some(sp) = data.get("starting_point") {
+                    if let Some(true) = sp.get("can_access").and_then(|v| v.as_bool()) {
+                        let server = sp.get("assigned_server").and_then(|s| {
+                            Some(VpnServer {
+                                id: s.get("id")?.as_i64()?,
+                                friendly_name: s.get("friendly_name")?.as_str()?.to_string(),
+                                current_clients: s.get("current_clients")?.as_i64()?,
+                                location: s.get("location")?.as_str()?.to_string(),
+                            })
+                        });
+                        
+                        let location_type = sp.get("location_type_friendly")
+                            .and_then(|v| v.as_str())
+                            .ok_or("Missing location_type_friendly")?
+                            .to_string();
+                        
+                        connections.push(VpnAccess {
+                            access_type: "starting_point".to_string(),
+                            location_type,
+                            can_access: true,
+                            server,
+                        });
+                    }
+                }
+
+                // Parse fortresses
+                if let Some(fort) = data.get("fortresses") {
+                    if let Some(true) = fort.get("can_access").and_then(|v| v.as_bool()) {
+                        let server = fort.get("assigned_server").and_then(|s| {
+                            Some(VpnServer {
+                                id: s.get("id")?.as_i64()?,
+                                friendly_name: s.get("friendly_name")?.as_str()?.to_string(),
+                                current_clients: s.get("current_clients")?.as_i64()?,
+                                location: s.get("location")?.as_str()?.to_string(),
+                            })
+                        });
+                        
+                        let location_type = fort.get("location_type_friendly")
+                            .and_then(|v| v.as_str())
+                            .ok_or("Missing location_type_friendly")?
+                            .to_string();
+                        
+                        connections.push(VpnAccess {
+                            access_type: "fortresses".to_string(),
+                            location_type,
+                            can_access: true,
+                            server,
+                        });
+                    }
+                }
+            }
+            
+            Ok(connections)
+        }
+        Err(err) => Err(format!("API error: {:?}", err)),
+    }
 }
 
 async fn vpn_type() -> Option<Vec<String>> {
@@ -45,8 +135,6 @@ async fn vpn_type() -> Option<Vec<String>> {
                         vpntype.push(vpntype_value.to_string());
                     }
                 }
-            } else {
-                println!("Expected JSON array");
             }
         }
         Err(err) => {
@@ -60,7 +148,6 @@ async fn vpn_type() -> Option<Vec<String>> {
         }
     }
     
-    // If HTB VPN is active and tun0 is also active on your client...
     if get_interface_ip("tun0").is_some() {
         Some(vpntype)
     } else {
@@ -69,10 +156,10 @@ async fn vpn_type() -> Option<Vec<String>> {
 }
 
 pub async fn check_vpn(machine_spflag: bool) {
-    let mut vpn = String::new();
     if let Some(vpntypes) = vpn_type().await {
-        let vpntypes_str = vpntypes.join(", "); // Join the VPN types with a comma and space. Note that if we switch two different VPNs, they can still leave together for some time
+        let vpntypes_str = vpntypes.join(", ");
         let mut yn = String::new();
+        
         if vpntypes.len() > 1 {
             println!(
                 "\nThe following VPN types are already running: {vpntypes_str}. You have multiple VPNs running. The oldest one will go down automatically in some minutes."
@@ -83,215 +170,131 @@ pub async fn check_vpn(machine_spflag: bool) {
             );
         }
 
-        print!("Do you want to terminate the listed VPN and choose a new one (y/n)? ");
+        print!("Do you want to terminate the listed VPN and connect to a different one (y/n)? ");
         io::stdout().flush().expect("Flush failed!");
         io::stdin().read_line(&mut yn).expect("Failed to read input");
-        loop {
-            match yn.trim() {
-                "y" | "Y" => {
-                    if machine_spflag {
-                        print_vpn_sp_list();
-                    } else {
-                        print_vpn_machine_list();
-                    }
-                    print!("Please, provide one VPN server you prefer to connect: ");
-                    io::stdout().flush().expect("Flush failed!");
-                    io::stdin()
-                        .read_line(&mut vpn)
-                        .expect("Failed to read line");
-                    run_vpn(&vpn).await;
-                    break;
-                }
-                "n" | "N" => break,
-                _ => println!("Invalid answer."),
+        
+        match yn.trim() {
+            "y" | "Y" => {
+                run_vpn(machine_spflag).await;
             }
+            _ => {}
         }
-    }
-    else {
-        if machine_spflag {
-            print_vpn_sp_list();
-        } else {
-            print_vpn_machine_list();
-        }
-        print!("Please, provide one VPN server you prefer to connect: ");
-        io::stdout().flush().expect("Flush failed!");
-        io::stdin()
-            .read_line(&mut vpn)
-            .expect("Failed to read line");
-        run_vpn(&vpn).await;
+    } else {
+        run_vpn(machine_spflag).await;
     }
 }
 
-pub async fn run_vpn(chosen_server: &str) {
-
+pub async fn run_vpn(is_starting_point: bool) {
     let appkey = get_appkey();
     
-    let mut vpn_tcp = String::from("/1");
-
-    let mut vpn_servers = HashMap::new();
-    vpn_servers.insert(String::from("EUFree1"), "1");
-    vpn_servers.insert(String::from("EUFree2"), "201");
-    vpn_servers.insert(String::from("EUFree3"), "253");
-    vpn_servers.insert(String::from("USFree1"), "113");
-    vpn_servers.insert(String::from("USFree2"), "202");
-    vpn_servers.insert(String::from("USFree3"), "254");
-    vpn_servers.insert(String::from("AUFree1"), "117");
-    vpn_servers.insert(String::from("SGFree1"), "251");
-    vpn_servers.insert(String::from("EUVIP1"), "2");
-    vpn_servers.insert(String::from("EUVIP2"), "5");
-    vpn_servers.insert(String::from("EUVIP3"), "6");
-    vpn_servers.insert(String::from("EUVIP4"), "7");
-    vpn_servers.insert(String::from("EUVIP5"), "8");
-    vpn_servers.insert(String::from("EUVIP6"), "9");
-    vpn_servers.insert(String::from("EUVIP7"), "18");
-    vpn_servers.insert(String::from("EUVIP8"), "21");
-    vpn_servers.insert(String::from("EUVIP9"), "28");
-    vpn_servers.insert(String::from("EUVIP10"), "30");
-    vpn_servers.insert(String::from("EUVIP11"), "33");
-    vpn_servers.insert(String::from("EUVIP12"), "36");
-    vpn_servers.insert(String::from("EUVIP13"), "42");
-    vpn_servers.insert(String::from("EUVIP14"), "44");
-    vpn_servers.insert(String::from("EUVIP15"), "47");
-    vpn_servers.insert(String::from("EUVIP16"), "49");
-    vpn_servers.insert(String::from("EUVIP17"), "51");
-    vpn_servers.insert(String::from("EUVIP18"), "54");
-    vpn_servers.insert(String::from("EUVIP19"), "57");
-    vpn_servers.insert(String::from("EUVIP20"), "61");
-    vpn_servers.insert(String::from("EUVIP21"), "66");
-    vpn_servers.insert(String::from("EUVIP22"), "68");
-    vpn_servers.insert(String::from("EUVIP23"), "70");
-    vpn_servers.insert(String::from("EUVIP24"), "73");
-    vpn_servers.insert(String::from("EUVIP25"), "77");
-    vpn_servers.insert(String::from("EUVIP26"), "219");
-    vpn_servers.insert(String::from("EUVIP27"), "222");
-    vpn_servers.insert(String::from("EUVIP28"), "122");
-    vpn_servers.insert(String::from("USVIP1"), "11");
-    vpn_servers.insert(String::from("USVIP2"), "14");
-    vpn_servers.insert(String::from("USVIP3"), "17");
-    vpn_servers.insert(String::from("USVIP4"), "20");
-    vpn_servers.insert(String::from("USVIP5"), "23");
-    vpn_servers.insert(String::from("USVIP6"), "27");
-    vpn_servers.insert(String::from("USVIP7"), "29");
-    vpn_servers.insert(String::from("USVIP8"), "31");
-    vpn_servers.insert(String::from("USVIP9"), "35");
-    vpn_servers.insert(String::from("USVIP10"), "38");
-    vpn_servers.insert(String::from("USVIP11"), "41");
-    vpn_servers.insert(String::from("USVIP12"), "45");
-    vpn_servers.insert(String::from("USVIP13"), "46");
-    vpn_servers.insert(String::from("USVIP14"), "48");
-    vpn_servers.insert(String::from("USVIP15"), "50");
-    vpn_servers.insert(String::from("USVIP16"), "52");
-    vpn_servers.insert(String::from("USVIP17"), "56");
-    vpn_servers.insert(String::from("USVIP18"), "58");
-    vpn_servers.insert(String::from("USVIP19"), "65");
-    vpn_servers.insert(String::from("USVIP20"), "67");
-    vpn_servers.insert(String::from("USVIP21"), "69");
-    vpn_servers.insert(String::from("USVIP22"), "71");
-    vpn_servers.insert(String::from("USVIP23"), "74");
-    vpn_servers.insert(String::from("USVIP24"), "86");
-    vpn_servers.insert(String::from("USVIP25"), "89");
-    vpn_servers.insert(String::from("USVIP26"), "220");
-    vpn_servers.insert(String::from("USVIP27"), "223");
-    vpn_servers.insert(String::from("AUVIP1"), "182");
-    vpn_servers.insert(String::from("SGVIP1"), "252");
-    vpn_servers.insert(String::from("SGVIP2"), "280");
-    vpn_servers.insert(String::from("EUVIP+1"), "288");
-    vpn_servers.insert(String::from("EUVIP+2"), "314");
-    vpn_servers.insert(String::from("USVIP+1"), "289");
-    vpn_servers.insert(String::from("SGVIP+1"), "426");
-    vpn_servers.insert(String::from("EUSPFree1"), "412");
-    vpn_servers.insert(String::from("EUSPVIP1"), "413");
-    vpn_servers.insert(String::from("USSPFree1"), "414");
-    vpn_servers.insert(String::from("USSPVIP1"), "415");
-
-    let mut key = chosen_server.trim().to_string();
-    loop {
-        if !vpn_servers.contains_key(&key) {
-            // Server not found, run the print_list() function
-            key.clear(); // Clear the variable's content
-            print_vpn_sp_list();
-            print_vpn_machine_list();
-            print!("Please, provide one VPN server you prefer to connect: ");
-            io::stdout().flush().expect("Flush failed!");
-            io::stdin()
-                .read_line(&mut key)
-                .expect("Failed to read line");
-
-            key = key.trim().to_string();
+    // Get available connections
+    let connections = match get_vpn_connections().await {
+        Ok(conns) => conns,
+        Err(e) => {
+            eprintln!("\x1B[31mFailed to get VPN connections: {}\x1B[0m", e);
+            std::process::exit(1);
         }
-        else {
-            break;
+    };
+
+    // Filter based on type
+    let filtered: Vec<VpnAccess> = connections.into_iter().filter(|c| {
+        if is_starting_point {
+            c.access_type == "starting_point"
+        } else {
+            c.access_type == "lab"
+        }
+    }).collect();
+
+    if filtered.is_empty() {
+        eprintln!("\x1B[31mNo VPN access available for this type.\x1B[0m");
+        std::process::exit(1);
+    }
+
+    // Display available connections
+    println!("\n{BCYAN}Available VPN Connections:{RESET}");
+    for (idx, conn) in filtered.iter().enumerate() {
+        if let Some(server) = &conn.server {
+            println!("{}. {} - {} ({} users)", 
+                idx + 1, 
+                conn.location_type, 
+                server.friendly_name,
+                server.current_clients
+            );
         }
     }
 
-    let vpn_id = vpn_servers[&key];
+    // Select connection
+    let selected = if filtered.len() == 1 {
+        println!("\n{BGREEN}Auto-selecting the only available server.{RESET}");
+        filtered[0].clone()
+    } else {
+        print!("\nSelect VPN (1-{}): ", filtered.len());
+        io::stdout().flush().expect("Flush failed!");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read line");
+        
+        let choice: usize = input.trim().parse().unwrap_or(1);
+        if choice < 1 || choice > filtered.len() {
+            eprintln!("Invalid selection");
+            std::process::exit(1);
+        }
+        filtered[choice - 1].clone()
+    };
 
+    let server = match &selected.server {
+        Some(s) => s.clone(),
+        None => {
+            eprintln!("\x1B[31mNo server assigned.\x1B[0m");
+            std::process::exit(1);
+        }
+    };
+
+    // Ask for TCP/UDP
+    let mut vpn_tcp_flag = 0; // 0 = UDP, 1 = TCP
     loop {
         let mut input = String::new();
         print!("\n{BGREEN}Would you like to connect to Hack The Box VPN by UDP or TCP? [UDP] {RESET}");
         io::stdout().flush().expect("Flush failed!");
         io::stdin().read_line(&mut input).expect("Failed to read line");
-        input = input.trim().to_string(); //remove \n from Enter keyboard button
+        input = input.trim().to_string();
 
         if input.is_empty() {
             input = "udp".to_string();
         }
 
-        match input.trim().to_lowercase().as_str() {
-            "udp" => {
-                break;
-            }
+        match input.to_lowercase().as_str() {
+            "udp" => break,
             "tcp" => {
-                vpn_tcp = String::from("/0");
+                vpn_tcp_flag = 1;
                 break;
             }
-            _ => {
-                println!("{BGREEN}Please select UDP or TCP:{RESET}");
-            }
+            _ => println!("{BGREEN}Please select UDP or TCP:{RESET}"),
         }
     }
 
-    println!("\nConnecting to {key} server [id={vpn_id}]\n");
+    println!("\nConnecting to {} [id={}]\n", server.friendly_name, server.id);
 
+    // Kill existing OpenVPN
     let _output = Command::new("sudo")
         .arg("killall")
         .arg("openvpn")
         .output()
         .expect("Failed to execute command");
 
-    let switch_url = format!("https://labs.hackthebox.com/api/v4/connections/servers/switch/{vpn_id}");
+    // Download and start VPN
     let blocking_task = spawn(async move {
         let client = Client::new();
-        let response = client
-            .post(switch_url)
-            .header("Authorization", format!("Bearer {appkey}"))
-            .send()
-            .await;
-
-        match response {
-            Ok(response) => {
-                if response.status().is_success() {
-                    let response_text = response.text().await.unwrap();
-                    let response_json: Value = serde_json::from_str(&response_text).unwrap();
-                    let message = response_json["message"].as_str().unwrap();
-                    println!("Switch response: {message}");
-                } else {
-                    eprintln!("API call failed with status: {}", response.status());
-                    std::process::exit(1);
-                }
-            }
-            Err(err) => {
-                eprintln!("API call error: {err:?}");
-                std::process::exit(1);
-            }
-        }
-
+        
+        // Download OVPN file
         let ovpn_url = format!(
-            "https://labs.hackthebox.com/api/v4/access/ovpnfile/{vpn_id}{vpn_tcp}"
+            "https://labs.hackthebox.com/api/v4/access/ovpnfile/{}/{}",
+            server.id, vpn_tcp_flag
         );
+        
         let ovpn_response = client
             .get(ovpn_url)
-            .header("Authorization", format!("Bearer {appkey}"))
+            .header("Authorization", format!("Bearer {}", appkey))
             .send()
             .await;
 
@@ -300,43 +303,43 @@ pub async fn run_vpn(chosen_server: &str) {
                 if response.status().is_success() {
                     let ovpn_content = response.text().await.unwrap();
                     let ovpn_file_path = format!("{}/lab-vpn.ovpn", std::env::var("HOME").unwrap_or_default());
-                    // Write content to a file named "lab-vpn.ovpn"
+                    
                     if let Err(err) = fs::write(&ovpn_file_path, ovpn_content) {
                         eprintln!("Error writing to file: {err}");
+                        std::process::exit(1);
                     } else {
-                        println!("File saved successfully.");
+                        println!("VPN config file saved successfully.");
                     }
 
-                    let mut openvpn_cmd = Command::new("sudo");
-                    openvpn_cmd
+                    let status = Command::new("sudo")
                         .arg("openvpn")
                         .arg("--config")
                         .arg(ovpn_file_path)
-                        .arg("--daemon");
-
-                    let status = openvpn_cmd.status().expect("Failed to execute openvpn command");
+                        .arg("--daemon")
+                        .status()
+                        .expect("Failed to execute openvpn command");
+                        
                     if status.success() {
-                        println!("OpenVPN started successfully");
+                        println!("{BGREEN}OpenVPN started successfully{RESET}");
                     } else {
-                        eprintln!("OpenVPN process exited with error: {status:?}");
+                        eprintln!("\x1B[31mOpenVPN process exited with error: {status:?}\x1B[0m");
                         std::process::exit(1);
                     }
                 } else {
-                    eprintln!("API call failed with status: {}", response.status());
+                    eprintln!("\x1B[31mAPI call failed with status: {}\x1B[0m", response.status());
                     std::process::exit(1);
                 }
             }
             Err(err) => {
-                eprintln!("API call error: {err:?}");
+                eprintln!("\x1B[31mAPI call error: {err:?}\x1B[0m");
                 std::process::exit(1);
             }
         }
     });
 
-    // Await the result of the blocking task
     blocking_task.await.expect("Blocking task failed");
-
     thread::sleep(Duration::from_secs(5));
 
-    println!("You are running OpenVPN in background. For terminating it, close this window by mouse right-click on the window bar. If you type 'exit', OpenVPN will restart due to its native configuration.");
+    println!("\n{BGREEN}You are running OpenVPN in background.{RESET}");
+    println!("To terminate it, close this window or run: sudo killall openvpn");
 }
