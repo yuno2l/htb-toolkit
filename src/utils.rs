@@ -195,7 +195,7 @@ pub fn get_help() {
     println!("Play Hack The Box machines directly on your system.");
     println!();
     std::thread::sleep(std::time::Duration::from_secs(2));
-    println!("{} [-h] [-a] [-f] [-k] <set|reset|delete> [-m] <machine-name> [-l] <free|retired|starting> [-p] <true|false> [-r] [-s] [-u] [-v] <lab|starting_point|fortress>", env::args().next().unwrap());
+    println!("{} [-h] [-a] [-f] [-k] <set|reset|delete> [-m] <machine-name> [-l] <free|retired|starting> [-p] <true|false> [-r] [-s] [-u] [-v] <lab|starting|fortress>", env::args().next().unwrap());
     println!();
     println!("Options:");
     println!("-a                            Print information about the current active machine.");
@@ -208,13 +208,13 @@ pub fn get_help() {
     println!("-r                            Reset the playing machine.");
     println!("-s                            Stop the playing machine.");
     println!("-u                            Update free machines in the Red Team menu.");
-    println!("-v <lab|starting_point|fortress>  Connect to a Hack The Box VPN.");
+    println!("-v <lab|starting|fortress>    Connect to a Hack The Box VPN.");
     println!();
     println!("VPN Connection:");
     println!("HTB now automatically assigns VPN servers based on your location.");
     println!("Available VPN types:");
     println!("  lab            - Machines VPN (automatically assigned)");
-    println!("  starting_point - Starting Point VPN (automatically assigned)");
+    println!("  starting       - Starting Point VPN (automatically assigned)");
     println!("  fortress       - Fortress VPN (automatically assigned)");
     println!();
     println!("Usage Examples:");
@@ -224,7 +224,7 @@ pub fn get_help() {
     println!("{} -m Eighteen", env::args().next().unwrap());
     println!("{} -u", env::args().next().unwrap());
     println!("{} -v lab", env::args().next().unwrap());
-    println!("{} -v starting_point", env::args().next().unwrap());
+    println!("{} -v starting", env::args().next().unwrap());
 }
 
 pub fn is_inside_container() -> bool {
