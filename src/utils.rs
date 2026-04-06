@@ -358,44 +358,65 @@ pub fn add_hosts(machine_info: &PlayingMachine) -> Result<(), Box<dyn std::error
                     ans = domain_name;
                 }
 
-                if is_inside_container() {
-                    let mut hosts_content = format!("{}  {}\n", machine_info.ip, ans);
-                    if let Ok(existing_content) = std::fs::read_to_string(hosts_path) {
-                        if !existing_content.contains(&hosts_content) {
-                            hosts_content = existing_content + &hosts_content;
-                        }
-                    }
-                    std::fs::write("/tmp/hosts.new", hosts_content).expect("Failed to write to hosts.new");
-                    std::process::Command::new("sudo")
-                        .args(["cp", "-f", "/tmp/hosts.new", "/etc/hosts"])
-                        .status()
-                        .expect("Failed to copy hosts file");
-                    std::fs::remove_file("/tmp/hosts.new").expect("Failed to remove hosts.new");
-                } else {
-                    // Read the current contents of the hosts file
-                    let current_content = fs::read_to_string(hosts_path)?;
-                    let new_entry = format!("{} {}", machine_info.ip, ans);
-                    
-                    // Check if the new entry already exists in the hosts file. If so, remove it because it could be placed at bottom than a more recent (and wrong) one
-                    if current_content.contains(&new_entry) {
-                        println!("Hosts file already contains the new entry. Removing old entry...");
-                        let sed_remove_pattern = format!("/{new_entry}/d");
+                let current_content = fs::read_to_string(hosts_path).unwrap_or_default();
+                let updated_content = update_hosts_entry(&current_content, &machine_info.ip, &ans);
+                std::fs::write("/tmp/hosts.new", updated_content).expect("Failed to write to hosts.new");
+                let copy_status = std::process::Command::new("sudo")
+                    .args(["cp", "-f", "/tmp/hosts.new", "/etc/hosts"])
+                    .status()
+                    .expect("Failed to copy hosts file");
 
-                        std::process::Command::new("sudo")
-                            .args(["sed", "-i", &sed_remove_pattern, "/etc/hosts"])
-                            .status()
-                            .expect("Failed to edit hosts file");
-                    }
-                    let sed_pattern = format!("1i{new_entry}");
-                    std::process::Command::new("sudo")
-                        .args(["sed", "-i", &sed_pattern, "/etc/hosts"])
-                        .status()
-                        .expect("Failed to edit hosts file");
+                if !copy_status.success() && !is_inside_container() {
+                    eprintln!("Failed to update /etc/hosts. Are you allowed to use sudo?");
                 }
+
+                std::fs::remove_file("/tmp/hosts.new").expect("Failed to remove hosts.new");
                 return Ok(());
             }
             "n" | "N" => return Ok(()),
             _ => println!("Invalid answer."),
         }
     }
+}
+
+fn update_hosts_entry(existing_content: &str, ip: &str, hostname: &str) -> String {
+    let mut updated_lines: Vec<String> = Vec::new();
+    let mut replaced = false;
+
+    for line in existing_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            updated_lines.push(line.to_string());
+            continue;
+        }
+
+        let (body, comment) = match line.split_once('#') {
+            Some((left, right)) => (left.trim(), Some(right.trim())),
+            None => (line, None),
+        };
+
+        let mut parts: Vec<&str> = body.split_whitespace().collect();
+        if parts.len() >= 2 && parts[1..].iter().any(|part| *part == hostname) {
+            parts[0] = ip;
+            replaced = true;
+            let new_body = parts.join(" ");
+            if let Some(comment_text) = comment {
+                updated_lines.push(format!("{new_body} #{comment_text}"));
+            } else {
+                updated_lines.push(new_body);
+            }
+        } else {
+            updated_lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        updated_lines.insert(0, format!("{} {}", ip, hostname));
+    }
+
+    let mut result = updated_lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
