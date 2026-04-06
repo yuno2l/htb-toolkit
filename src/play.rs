@@ -10,6 +10,7 @@ use reqwest::Client;
 use serde::Serialize;
 use serde_json::{json,Value};
 use tokio::spawn;
+use tokio::time::{sleep, Duration};
 
 #[derive(Serialize)]
 struct ReviewData {
@@ -106,6 +107,9 @@ pub async fn play_machine(machine_name: &str) -> Result<(), Box<dyn std::error::
     blocking_task.await.expect("Blocking task failed");
     
     machine_info.ip = get_ip(&appkey_clone).await; // For Starting Point machines and VIP and VIP+ VPNs, if I call the play API two times on the same machine, the old IP address associated to the machine can still live for some seconds providing a wrong IP related to the new same machine. For this reason, it is better to compute always the IP address (no problems for free VPNs because they associate always the same IP address to the same machine)
+    if machine_info.ip.is_empty() || machine_info.ip == "null" {
+        machine_info.ip = wait_for_machine_ip(machine_name, &appkey_clone).await;
+    }
 
     let mut user_info = PlayingUser::get_playinguser(&appkey_clone).await; // Before this it is needed to run HTB VPN to take the Attacker IP address
 
@@ -129,6 +133,18 @@ pub async fn play_machine(machine_name: &str) -> Result<(), Box<dyn std::error::
     display_target_info(&machine_info, &user_info);
 
     Ok(())
+}
+
+async fn wait_for_machine_ip(machine_name: &str, appkey: &str) -> String {
+    loop {
+        let machine_info = PlayingMachine::get_machine(machine_name, appkey).await;
+        if !machine_info.ip.is_empty() && machine_info.ip != "null" {
+            return machine_info.ip;
+        }
+
+        println!("Waiting for machine IP assignment... retrying in 10 seconds.");
+        sleep(Duration::from_secs(10)).await;
+    }
 }
 
 pub async fn submit_flag() {
